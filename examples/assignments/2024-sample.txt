@@ -1,0 +1,9 @@
+# Secret Santa 2024
+# Format: Giver -> Receiver
+# (Sample output)
+Alex Parker -> Riley Chen
+Sam Parker -> Morgan Kim
+Jordan Lee -> Alex Parker
+Casey Lee -> Sam Parker
+Morgan Kim -> Jordan Lee
+Riley Chen -> Casey Lee

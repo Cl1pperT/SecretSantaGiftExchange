@@ -1,0 +1,26 @@
+# Bytecode / env
+__pycache__/
+*.py[cod]
+.venv/
+.Venv/
+.env
+*.DS_Store
+
+# Personal data (keep local only)
+people.txt
+People.txt
+emails.txt
+Emails.txt
+sendercredentials.txt
+sendercredentials.private.txt
+*.private.*
+20??.txt
+/assignments/
+OldCode/
+private/
+
+# Logs / misc
+*.log
+
+# Allow checked-in examples
+!examples/**
