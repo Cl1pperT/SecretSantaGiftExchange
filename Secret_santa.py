@@ -2,11 +2,11 @@
 """
 Secret Santa matcher with constraints:
   1) No one gifts to themselves.
-  2) No one gifts to their spouse.
+  2) No one gifts to anyone listed on their line (spouse, siblings).
   3) No one gifts to someone they gifted in the past N years (default 3).
 
 INPUTS (same directory as this script by default):
-  - people.txt            : participants (Name[, Spouse])
+  - people.txt            : participants (Name[, Spouse/Sibling, ...])
   - YYYY.txt              : previous assignment files, e.g., 2023.txt, 2024.txt (optional)
 
 OUTPUT:
@@ -38,11 +38,16 @@ from typing import Dict, List, Set, Tuple, Optional
 
 _LINE_SEP_RE = re.compile(r"\s*(?:->|:|,|-)\s*")
 
-def _read_people(path: Path) -> Tuple[List[str], Dict[str, Optional[str]]]:
+def _read_people(path: Path) -> Tuple[List[str], Dict[str, Set[str]]]:
+    """
+    Each line: Name[, Excluded1, Excluded2, ...]
+    Everyone listed after the first name is someone that person may not gift to
+    (a spouse, or siblings). Exclusions are applied in both directions.
+    """
     if not path.exists():
         sys.exit(f"[ERROR] People file not found: {path}")
 
-    raw_pairs: List[Tuple[str, Optional[str]]] = []
+    raw: List[Tuple[str, List[str]]] = []
     with path.open("r", encoding="utf-8") as f:
         for ln in f:
             s = ln.strip()
@@ -51,32 +56,27 @@ def _read_people(path: Path) -> Tuple[List[str], Dict[str, Optional[str]]]:
             # split by comma, pipe, or tab
             parts = re.split(r"[,\|\t]", s)
             parts = [p.strip() for p in parts if p.strip()]
-            if len(parts) == 1:
-                raw_pairs.append((parts[0], None))
-            elif len(parts) >= 2:
-                raw_pairs.append((parts[0], parts[1]))
-            else:
-                continue
+            if parts:
+                raw.append((parts[0], parts[1:]))
 
     # Normalize names (unique, preserve insertion order)
     names: List[str] = []
     seen = set()
-    for name, spouse in raw_pairs:
+    for name, _ in raw:
         if name not in seen:
             names.append(name)
             seen.add(name)
 
-    # Build spouse map (symmetrize when possible)
-    spouse: Dict[str, Optional[str]] = {n: None for n in names}
+    # Build exclusion map (symmetric)
+    excluded: Dict[str, Set[str]] = {n: set() for n in names}
     name_set = set(names)
-    for name, s in raw_pairs:
-        if s and s in name_set:
-            spouse[name] = s
-            # If partner exists, symmetrize silently (don’t override explicit)
-            if spouse.get(s) is None:
-                spouse[s] = name
+    for name, others in raw:
+        for o in others:
+            if o in name_set and o != name:
+                excluded[name].add(o)
+                excluded[o].add(name)
 
-    return names, spouse
+    return names, excluded
 
 
 def _read_history_files(directory: Path, current_year: int, years_back: int) -> Dict[str, Set[str]]:
@@ -120,7 +120,7 @@ def _read_history_files(directory: Path, current_year: int, years_back: int) -> 
 
 def _build_allowed(
     names: List[str],
-    spouse: Dict[str, Optional[str]],
+    excluded: Dict[str, Set[str]],
     disallow_recent: Dict[str, Set[str]],
 ) -> Dict[str, Set[str]]:
     name_set = set(names)
@@ -128,8 +128,7 @@ def _build_allowed(
     for g in names:
         dis = set()
         dis.add(g)  # no self
-        if spouse.get(g):
-            dis.add(spouse[g])  # no spouse
+        dis |= excluded.get(g, set())  # no spouse / siblings
         dis |= disallow_recent.get(g, set())
         allowed[g] = name_set - dis
     return allowed
@@ -215,7 +214,7 @@ def main():
     out_path = output_dir / f"{year}.txt"
 
     # 1) Read participants & spouses
-    names, spouse = _read_people(people_path)
+    names, excluded = _read_people(people_path)
     if len(names) < 2:
         sys.exit("[ERROR] Need at least 2 participants.")
 
@@ -223,7 +222,7 @@ def main():
     disallow_recent = _read_history_files(data_dir, current_year=year, years_back=args.years)
 
     # 3) Build allowed edges
-    allowed = _build_allowed(names, spouse, disallow_recent)
+    allowed = _build_allowed(names, excluded, disallow_recent)
 
     # Quick sanity: ensure each giver has at least 1 allowed
     impossible = [g for g in names if not allowed[g]]
@@ -231,7 +230,7 @@ def main():
         lines = "\n".join(f"  - {g}" for g in impossible)
         sys.exit(
             "[ERROR] No valid receivers for the following participants given constraints:\n"
-            f"{lines}\nTry reducing constraints, adjusting spouses, or adding more participants."
+            f"{lines}\nTry reducing constraints, adjusting exclusions, or adding more participants."
         )
 
     # 4) Solve
